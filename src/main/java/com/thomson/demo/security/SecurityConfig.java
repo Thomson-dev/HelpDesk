@@ -26,8 +26,16 @@ public class SecurityConfig {
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/**").permitAll()
-                .requestMatchers("/api/tickets/**").hasAnyRole("CUSTOMER", "AGENT", "ADMIN")
+                .requestMatchers("/api/tickets").hasAnyRole("CUSTOMER", "AGENT", "ADMIN")
+                .requestMatchers("/api/tickets/customer/**").hasRole("CUSTOMER")
+                .requestMatchers("/api/tickets/agent/**").hasAnyRole("AGENT", "ADMIN")
+                .requestMatchers("/api/tickets/*/assign/**").hasRole("ADMIN")
+                
+                .requestMatchers("/api/auth/assign-role").hasRole("ADMIN")
+                .requestMatchers("/api/tickets/*/status").hasAnyRole("AGENT", "ADMIN")
+                .requestMatchers("/api/tickets/breached").hasRole("ADMIN")
                 .requestMatchers("/api/audit-logs/**").hasRole("ADMIN")
+                .requestMatchers("/api/sla-policies", "/api/sla-policies/**").hasRole("ADMIN")
                 .anyRequest().authenticated()
             )
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);

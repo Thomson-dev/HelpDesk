@@ -1,13 +1,19 @@
 package com.thomson.demo.service;
 
+import com.thomson.demo.dto.CreateTicketRequest;
+import com.thomson.demo.dto.TicketResponse;
 import com.thomson.demo.entity.*;
+import com.thomson.demo.enums.IssueCategory;
+import com.thomson.demo.enums.Priority;
 import com.thomson.demo.enums.TicketStatus;
 import com.thomson.demo.repository.*;
+import com.thomson.demo.security.SecurityUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -17,23 +23,46 @@ public class TicketService {
     private final UserRepository userRepository;
     private final SlaPolicyRepository slaPolicyRepository;
     private final AuditLogRepository auditLogRepository;
+    private final SecurityUtils securityUtils;
 
-    public Ticket createTicket(Ticket ticket) {
+    public TicketResponse createTicket(CreateTicketRequest request) {
+        User customer = securityUtils.getLoggedInUser();
+
+        Priority priority = resolvePriority(request.getCategory());
+
         SlaPolicy policy = slaPolicyRepository
-                .findByPriority(ticket.getPriority())
-                .orElseThrow(() -> new RuntimeException("SLA policy not found for priority: " + ticket.getPriority()));
+                .findByPriority(priority)
+                .orElseThrow(() -> new RuntimeException("SLA policy not found"));
 
-        ticket.setResponseDueAt(ticket.getCreatedAt().plusHours(policy.getResponseTimeHours()));
-        ticket.setResolutionDueAt(ticket.getCreatedAt().plusHours(policy.getResolutionTimeHours()));
+        Ticket ticket = Ticket.builder()
+                .title(request.getTitle())
+                .description(request.getDescription())
+                .category(request.getCategory())
+                .priority(priority)
+                .customer(customer)
+                .build();
 
+        // Save first to trigger @PrePersist and populate createdAt
         Ticket saved = ticketRepository.save(ticket);
 
-        saveAuditLog(saved, saved.getCustomer(), "Ticket created by " + saved.getCustomer().getName());
+        // Now calculate SLA dates using the populated createdAt
+        saved.setResponseDueAt(saved.getCreatedAt()
+                .plusHours(policy.getResponseTimeHours()));
+        saved.setResolutionDueAt(saved.getCreatedAt()
+                .plusHours(policy.getResolutionTimeHours()));
 
-        return saved;
+        // Save again with updated SLA dates
+        saved = ticketRepository.save(saved);
+
+        saveAuditLog(saved, customer, "Ticket created by "
+                + customer.getName() + " — Category: " + request.getCategory());
+
+        return mapToResponse(saved);
     }
 
-    public Ticket assignTicket(UUID ticketId, UUID agentId, User admin) {
+    public TicketResponse assignTicket(UUID ticketId, UUID agentId) {
+        User admin = securityUtils.getLoggedInUser();
+
         Ticket ticket = ticketRepository.findById(ticketId)
                 .orElseThrow(() -> new RuntimeException("Ticket not found"));
 
@@ -45,12 +74,15 @@ public class TicketService {
 
         Ticket saved = ticketRepository.save(ticket);
 
-        saveAuditLog(saved, admin, "Ticket assigned to " + agent.getName() + " by " + admin.getName());
+        saveAuditLog(saved, admin, "Ticket assigned to "
+                + agent.getName() + " by " + admin.getName());
 
-        return saved;
+        return mapToResponse(saved);
     }
 
-    public Ticket updateStatus(UUID ticketId, TicketStatus newStatus, User performedBy) {
+    public TicketResponse updateStatus(UUID ticketId, TicketStatus newStatus) {
+        User performer = securityUtils.getLoggedInUser();
+
         Ticket ticket = ticketRepository.findById(ticketId)
                 .orElseThrow(() -> new RuntimeException("Ticket not found"));
 
@@ -58,25 +90,48 @@ public class TicketService {
 
         Ticket saved = ticketRepository.save(ticket);
 
-        saveAuditLog(saved, performedBy, "Status changed to " + newStatus + " by " + performedBy.getName());
+        saveAuditLog(saved, performer, "Status changed to "
+                + newStatus + " by " + performer.getName());
 
-        return saved;
+        return mapToResponse(saved);
     }
 
-    public List<Ticket> getAllTickets() {
-        return ticketRepository.findAll();
+    public List<TicketResponse> getAllTickets() {
+        return ticketRepository.findAll()
+                .stream().map(this::mapToResponse)
+                .collect(Collectors.toList());
     }
 
-    public List<Ticket> getTicketsByCustomer(UUID customerId) {
-        return ticketRepository.findByCustomerId(customerId);
+    public List<TicketResponse> getMyTickets() {
+        User customer = securityUtils.getLoggedInUser();
+        return ticketRepository.findByCustomerId(customer.getId())
+                .stream().map(this::mapToResponse)
+                .collect(Collectors.toList());
     }
 
-    public List<Ticket> getTicketsByAgent(UUID agentId) {
-        return ticketRepository.findByAssignedAgentId(agentId);
+    public List<TicketResponse> getMyAgentTickets() {
+        User agent = securityUtils.getLoggedInUser();
+        return ticketRepository.findByAssignedAgentId(agent.getId())
+                .stream().map(this::mapToResponse)
+                .collect(Collectors.toList());
     }
 
-    public List<Ticket> getBreachedTickets() {
-        return ticketRepository.findBySlaBreachedTrue();
+    public List<TicketResponse> getBreachedTickets() {
+        return ticketRepository.findBySlaBreachedTrue()
+                .stream().map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
+    private Priority resolvePriority(IssueCategory category) {
+        return switch (category) {
+            case ORDER_NOT_DELIVERED,
+                 PAYMENT_NOT_CONFIRMED -> Priority.CRITICAL;
+            case WRONG_ITEM_RECEIVED,
+                 REFUND_REQUEST,
+                 DAMAGED_ITEM -> Priority.HIGH;
+            case ACCOUNT_ISSUE -> Priority.MEDIUM;
+            case GENERAL_ENQUIRY -> Priority.LOW;
+        };
     }
 
     private void saveAuditLog(Ticket ticket, User performedBy, String action) {
@@ -86,5 +141,23 @@ public class TicketService {
                 .action(action)
                 .build();
         auditLogRepository.save(log);
+    }
+
+    private TicketResponse mapToResponse(Ticket ticket) {
+        return TicketResponse.builder()
+                .id(ticket.getId())
+                .title(ticket.getTitle())
+                .description(ticket.getDescription())
+                .category(ticket.getCategory())
+                .status(ticket.getStatus())
+                .priority(ticket.getPriority())
+                .createdAt(ticket.getCreatedAt())
+                .responseDueAt(ticket.getResponseDueAt())
+                .resolutionDueAt(ticket.getResolutionDueAt())
+                .slaBreached(ticket.isSlaBreached())
+                .customerName(ticket.getCustomer().getName())
+                .assignedAgentName(ticket.getAssignedAgent() != null
+                        ? ticket.getAssignedAgent().getName() : null)
+                .build();
     }
 }

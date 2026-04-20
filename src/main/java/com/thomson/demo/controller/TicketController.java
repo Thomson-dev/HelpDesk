@@ -1,6 +1,7 @@
 package com.thomson.demo.controller;
 
-import com.thomson.demo.entity.*;
+import com.thomson.demo.dto.CreateTicketRequest;
+import com.thomson.demo.dto.TicketResponse;
 import com.thomson.demo.enums.TicketStatus;
 import com.thomson.demo.service.TicketService;
 import lombok.RequiredArgsConstructor;
@@ -18,43 +19,41 @@ public class TicketController {
     private final TicketService ticketService;
 
     @PostMapping
-    public ResponseEntity<Ticket> createTicket(@RequestBody Ticket ticket) {
-        return ResponseEntity.ok(ticketService.createTicket(ticket));
+    public ResponseEntity<TicketResponse> createTicket(@RequestBody CreateTicketRequest request) {
+        return ResponseEntity.ok(ticketService.createTicket(request));
     }
 
     @GetMapping
-    public ResponseEntity<List<Ticket>> getAllTickets() {
+    public ResponseEntity<List<TicketResponse>> getAllTickets() {
         return ResponseEntity.ok(ticketService.getAllTickets());
     }
 
     @GetMapping("/customer/{customerId}")
-    public ResponseEntity<List<Ticket>> getTicketsByCustomer(@PathVariable UUID customerId) {
-        return ResponseEntity.ok(ticketService.getTicketsByCustomer(customerId));
+    public ResponseEntity<List<TicketResponse>> getTicketsByCustomer(@PathVariable UUID customerId) {
+        return ResponseEntity.ok(ticketService.getAllTickets());
     }
 
     @GetMapping("/agent/{agentId}")
-    public ResponseEntity<List<Ticket>> getTicketsByAgent(@PathVariable UUID agentId) {
-        return ResponseEntity.ok(ticketService.getTicketsByAgent(agentId));
+    public ResponseEntity<List<TicketResponse>> getTicketsByAgent(@PathVariable UUID agentId) {
+        return ResponseEntity.ok(ticketService.getAllTickets());
     }
 
     @GetMapping("/breached")
-    public ResponseEntity<List<Ticket>> getBreachedTickets() {
+    public ResponseEntity<List<TicketResponse>> getBreachedTickets() {
         return ResponseEntity.ok(ticketService.getBreachedTickets());
     }
 
     @PutMapping("/{ticketId}/assign/{agentId}")
-    public ResponseEntity<Ticket> assignTicket(
+    public ResponseEntity<TicketResponse> assignTicket(
             @PathVariable UUID ticketId,
-            @PathVariable UUID agentId,
-            @RequestBody User admin) {
-        return ResponseEntity.ok(ticketService.assignTicket(ticketId, agentId, admin));
+            @PathVariable UUID agentId) {
+        return ResponseEntity.ok(ticketService.assignTicket(ticketId, agentId));
     }
 
     @PutMapping("/{ticketId}/status")
-    public ResponseEntity<Ticket> updateStatus(
+    public ResponseEntity<TicketResponse> updateStatus(
             @PathVariable UUID ticketId,
-            @RequestParam TicketStatus status,
-            @RequestBody User performedBy) {
-        return ResponseEntity.ok(ticketService.updateStatus(ticketId, status, performedBy));
+            @RequestParam TicketStatus status) {
+        return ResponseEntity.ok(ticketService.updateStatus(ticketId, status));
     }
 }
